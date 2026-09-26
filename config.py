@@ -1,0 +1,7 @@
+DATA_PATH = "data/cicids.csv"
+
+TEST_SIZE = 0.2
+RANDOM_STATE = 42
+
+BATCH_SIZE = 64
+EPOCHS = 20
