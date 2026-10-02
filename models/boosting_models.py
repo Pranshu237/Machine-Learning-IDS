@@ -22,7 +22,13 @@ class _LabelMapped:
 
 def train_xgboost(X_train, y_train):
     classes, y_mapped = np.unique(y_train, return_inverse=True)
-    model = XGBClassifier(eval_metric="mlogloss", n_jobs=-1, random_state=RANDOM_STATE)
+    # XGBoost 3.x estimates each class's starting score (base_score) from
+    # the data. On the full training set, with classes as rare as 9
+    # Heartbleed flows in 2 million, the default model reached only 0.67
+    # macro F1 on its own training data. A fixed starting score of 0.5,
+    # the default in older versions, restored it (0.95). See
+    # experiments/xgboost_check.py and results/xgboost_check.json.
+    model = XGBClassifier(eval_metric="mlogloss", n_jobs=-1, random_state=RANDOM_STATE, base_score=0.5)
     model.fit(X_train, y_mapped)
     return _LabelMapped(model, classes)
 

@@ -61,7 +61,8 @@ cannot be linked by the hosts they connect.
 4. Run the benchmark, in two stages:
    `python train.py --stage full`, then `python train.py --stage subset`
    (the stages run separately because PyTorch and XGBoost/LightGBM can
-   conflict in one process on macOS)
+   conflict in one process on macOS). To retrain only some models and keep
+   the other saved results, add e.g. `--models xgboost`.
 5. Run the unseen-attack evaluation: `python evaluate_unseen.py`
    (add `--benign-train 500000` for a faster run on a laptop)
 

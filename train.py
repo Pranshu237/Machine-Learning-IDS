@@ -26,6 +26,9 @@ import time
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--stage", choices=["full", "subset"], required=True)
+parser.add_argument("--models", default=None,
+                    help="Comma-separated models to retrain (rf, xgboost, lightgbm, catboost, gnn); "
+                         "their results replace the saved ones and the rest are kept.")
 ARGS = parser.parse_args() if __name__ == "__main__" else None
 if ARGS is not None and ARGS.stage == "subset":
     # Must be set before NumPy, LightGBM or PyTorch are imported.
@@ -39,6 +42,14 @@ from models.boosting_models import train_catboost, train_lightgbm, train_xgboost
 from models.rf_model import train_rf  # noqa: E402
 from preprocessing.preprocess import preprocess  # noqa: E402
 from utils.metrics import evaluate  # noqa: E402
+
+SHORT_NAMES = {
+    "rf": "Random Forest",
+    "xgboost": "XGBoost",
+    "lightgbm": "LightGBM",
+    "catboost": "CatBoost",
+    "gnn": "GNN (GCN)",
+}
 
 TREE_MODELS = {
     "Random Forest": train_rf,
@@ -157,8 +168,20 @@ def write_report():
         f.write("\n".join(lines) + "\n")
 
 
-def main(stage):
+def main(stage, only=None):
     os.makedirs(RESULTS_DIR, exist_ok=True)
+    json_path = os.path.join(RESULTS_DIR, f"benchmark_{stage}.json")
+    previous = {}
+    if only:
+        unknown = [m for m in only if m not in SHORT_NAMES]
+        if unknown:
+            raise SystemExit(f"Unknown model(s): {unknown}. Choose from {list(SHORT_NAMES)}.")
+        if not os.path.exists(json_path):
+            raise SystemExit(f"--models needs an earlier full run of this stage ({json_path}).")
+        with open(json_path) as f:
+            previous = json.load(f)["results"]
+        keep = {SHORT_NAMES[m] for m in only}
+
     X_train, X_test, y_train, y_test, target_names = preprocess()
     counts = np.bincount(np.concatenate([y_train, y_test]), minlength=len(target_names))
     print(f"Flows after cleaning: {len(y_train) + len(y_test)} "
@@ -180,8 +203,11 @@ def main(stage):
         },
     }
 
+    def selected(models):
+        return {n: fn for n, fn in models.items() if not only or n in keep}
+
     if stage == "full":
-        output["results"] = run(TREE_MODELS, X_train, y_train, X_test, y_test, target_names)
+        output["results"] = run(selected(TREE_MODELS), X_train, y_train, X_test, y_test, target_names)
     else:
         # Same subset for every model. The split is already shuffled, so the
         # first rows are a random sample.
@@ -189,14 +215,18 @@ def main(stage):
         Xs_te, ys_te = X_test[:GNN_TEST_SIZE], y_test[:GNN_TEST_SIZE]
         labels = sorted(np.unique(ys_te).tolist())
         output["classes_scored"] = len(labels)
-        output["results"] = run({**TREE_MODELS, "GNN (GCN)": train_gnn},
+        output["results"] = run(selected({**TREE_MODELS, "GNN (GCN)": train_gnn}),
                                 Xs_tr, ys_tr, Xs_te, ys_te, target_names, labels=labels)
 
-    with open(os.path.join(RESULTS_DIR, f"benchmark_{stage}.json"), "w") as f:
+    if previous:
+        # Keep the original model order, replacing only the retrained ones
+        output["results"] = {n: output["results"].get(n, r) for n, r in previous.items()}
+
+    with open(json_path, "w") as f:
         json.dump(output, f, indent=2)
     write_report()
     print(f"\nSaved results to {RESULTS_DIR}/benchmark_{stage}.json and {RESULTS_DIR}/benchmark.md")
 
 
 if __name__ == "__main__":
-    main(ARGS.stage)
+    main(ARGS.stage, ARGS.models.split(",") if ARGS.models else None)
