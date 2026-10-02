@@ -1,92 +1,150 @@
-from preprocessing.preprocess import preprocess
+"""Train and score every model on CICIDS-2017.
+
+1. Full benchmark: the four tree ensembles on the full 80/20 split.
+2. Subset comparison: all five models (including the GNN) trained on the
+   same small training subset and scored on the same small test subset,
+   since the GNN's k-nearest-neighbour graph does not scale to 2.5M flows.
+
+Results are printed and saved to results/benchmark.md and results/benchmark.json.
+"""
+import json
+import os
+import platform
+import sys
+import time
+
+import numpy as np
+import sklearn
+
+from config import GNN_TEST_SIZE, GNN_TRAIN_SIZE, RANDOM_STATE, RESULTS_DIR
+from models.boosting_models import train_catboost, train_lightgbm, train_xgboost
+from models.gnn_model import GNNClassifier
 from models.rf_model import train_rf
-from models.boosting_models import train_xgboost, train_lightgbm, train_catboost
-from models.gnn_model import GNN, build_graph
+from preprocessing.preprocess import preprocess
 from utils.metrics import evaluate
 
-import torch
+TREE_MODELS = {
+    "Random Forest": train_rf,
+    "XGBoost": train_xgboost,
+    "LightGBM": train_lightgbm,
+    "CatBoost": train_catboost,
+}
 
 
-# ---------------- GNN ----------------
-def train_gnn(X_train, y_train, X_test, y_test):
-    print("\n--- Starting GNN training ---")
-
-    x_train, edge_index = build_graph(X_train)
-
-    num_classes = int(max(y_train)) + 1
-    model = GNN(input_dim=x_train.shape[1], num_classes=num_classes)
-
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
-    loss_fn = torch.nn.CrossEntropyLoss()
-
-    y_train_tensor = torch.tensor(y_train.astype(int), dtype=torch.long)
-
-    for epoch in range(5):
-        model.train()
-        optimizer.zero_grad()
-
-        out = model(x_train, edge_index)
-        loss = loss_fn(out, y_train_tensor)
-
-        loss.backward()
-        optimizer.step()
-
-        print(f"GNN Epoch {epoch+1}, Loss: {loss.item()}")
-
-    x_test, edge_test = build_graph(X_test)
-
-    model.eval()
-    preds = model(x_test, edge_test).argmax(dim=1)
-
-    print("\n--- GNN Results ---")
-    evaluate(y_test, preds.numpy())
+def train_gnn(X, y):
+    return GNNClassifier().fit(X, y)
 
 
-# ---------------- MAIN ----------------
+def run(models, X_train, y_train, X_test, y_test, target_names, labels=None):
+    results = {}
+    for name, train_fn in models.items():
+        print(f"\n--- Training {name} ---")
+        start = time.time()
+        model = train_fn(X_train, y_train)
+        train_seconds = time.time() - start
+
+        # A sanity check: a model that cannot fit its own training data
+        # has failed to train, which is different from failing to generalise.
+        rng = np.random.default_rng(RANDOM_STATE)
+        idx = rng.choice(len(y_train), size=min(len(y_train), 200_000), replace=False)
+        train_summary = evaluate(y_train[idx], model.predict(X_train[idx]), target_names, show=False)
+
+        print(f"\n--- {name} results ---")
+        summary = evaluate(y_test, model.predict(X_test), target_names, labels=labels)
+        summary["train_accuracy"] = train_summary["accuracy"]
+        summary["train_macro_f1"] = train_summary["macro_f1"]
+        summary["train_seconds"] = round(train_seconds, 1)
+        results[name] = summary
+    return results
+
+
+def table(results):
+    rows = [
+        "| Model | Accuracy | Macro precision | Macro recall | Macro F1 | Train macro F1 |",
+        "|---|---|---|---|---|---|",
+    ]
+    for name, r in results.items():
+        rows.append(
+            f"| {name} | {r['accuracy']:.4f} | {r['macro_precision']:.4f} | "
+            f"{r['macro_recall']:.4f} | {r['macro_f1']:.4f} | {r['train_macro_f1']:.4f} |"
+        )
+    return "\n".join(rows)
+
+
+def per_class_table(results):
+    names = list(next(iter(results.values()))["per_class"])
+    rows = ["| Class | Test flows | " + " | ".join(results) + " |",
+            "|---|---|" + "---|" * len(results)]
+    for n in names:
+        support = int(next(iter(results.values()))["per_class"][n]["support"])
+        recalls = " | ".join(f"{r['per_class'][n]['recall']:.4f}" for r in results.values())
+        rows.append(f"| {n} | {support} | {recalls} |")
+    return "\n".join(rows)
+
+
 def main():
+    os.makedirs(RESULTS_DIR, exist_ok=True)
     X_train, X_test, y_train, y_test, target_names = preprocess()
+    counts = np.bincount(np.concatenate([y_train, y_test]), minlength=len(target_names))
+    print(f"Flows after cleaning: {len(y_train) + len(y_test)} "
+          f"(train {len(y_train)}, test {len(y_test)}), features: {X_train.shape[1]}")
 
-    # -------- Random Forest --------
-    print("\n--- Training Random Forest ---")
-    rf_model = train_rf(X_train, y_train)
-    rf_preds = rf_model.predict(X_test)
+    full = run(TREE_MODELS, X_train, y_train, X_test, y_test, target_names)
 
-    print("\n--- RF Results ---")
-    evaluate(y_test, rf_preds, target_names)
+    # Same subset for every model. The split is already shuffled, so the
+    # first rows are a random sample.
+    Xs_tr, ys_tr = X_train[:GNN_TRAIN_SIZE], y_train[:GNN_TRAIN_SIZE]
+    Xs_te, ys_te = X_test[:GNN_TEST_SIZE], y_test[:GNN_TEST_SIZE]
+    subset_labels = sorted(np.unique(ys_te).tolist())
+    subset = run({**TREE_MODELS, "GNN (GCN)": train_gnn},
+                 Xs_tr, ys_tr, Xs_te, ys_te, target_names, labels=subset_labels)
 
-    # -------- XGBoost --------
-    print("\n--- Training XGBoost ---")
-    xgb_model = train_xgboost(X_train, y_train)
-    xgb_preds = xgb_model.predict(X_test)
+    env = {
+        "python": sys.version.split()[0],
+        "scikit-learn": sklearn.__version__,
+        "machine": platform.machine(),
+        "system": platform.system(),
+    }
+    with open(os.path.join(RESULTS_DIR, "benchmark.json"), "w") as f:
+        json.dump({"class_counts": dict(zip(map(str, target_names), counts.tolist())),
+                   "full": full, "subset": subset, "environment": env}, f, indent=2)
 
-    print("\n--- XGBoost Results ---")
-    evaluate(y_test, xgb_preds, target_names)
+    lines = [
+        "# Benchmark results",
+        "",
+        f"CICIDS-2017, {len(y_train) + len(y_test):,} flows after cleaning and de-duplication, "
+        f"{X_train.shape[1]} features, {len(target_names)} classes. "
+        f"Stratified 80/20 split (seed {RANDOM_STATE}); the scaler is fitted on the training set only.",
+        "",
+        "Macro scores weight every class equally, so they show how well the rare attacks are caught. "
+        "Accuracy is dominated by BENIGN traffic (about 83% of flows).",
+        "",
+        f"## Full test set ({len(y_test):,} flows)",
+        "",
+        table(full),
+        "",
+        "### Recall per class",
+        "",
+        per_class_table(full),
+        "",
+        "Classes with only a handful of test flows (Heartbleed, Infiltration, SQL injection) "
+        "give recall figures that rest on very few examples.",
+        "",
+        f"## Same subset for all models ({GNN_TRAIN_SIZE:,} training / {GNN_TEST_SIZE:,} test flows)",
+        "",
+        f"Averaged over the {len(subset_labels)} classes present in the test subset.",
+        "",
+        table(subset),
+        "",
+        "The GNN connects each flow to its most similar flows in feature space "
+        "(a k-nearest-neighbour graph), not to the hosts it communicated with.",
+        "",
+        f"Environment: Python {env['python']}, scikit-learn {env['scikit-learn']}, {env['system']} {env['machine']}.",
+    ]
+    with open(os.path.join(RESULTS_DIR, "benchmark.md"), "w") as f:
+        f.write("\n".join(lines) + "\n")
+    print(f"\nSaved results to {RESULTS_DIR}/benchmark.md")
 
-    # -------- LightGBM --------
-    print("\n--- Training LightGBM ---")
-    lgb_model = train_lightgbm(X_train, y_train)
-    lgb_preds = lgb_model.predict(X_test)
 
-    print("\n--- LightGBM Results ---")
-    evaluate(y_test, lgb_preds, target_names)
-
-    # -------- CatBoost --------
-    print("\n--- Training CatBoost ---")
-    cat_model = train_catboost(X_train, y_train)
-    cat_preds = cat_model.predict(X_test)
-
-    print("\n--- CatBoost Results ---")
-    evaluate(y_test, cat_preds, target_names)
-
-    # -------- GNN (small data) --------
-    X_train_small = X_train[:5000]
-    y_train_small = y_train[:5000]
-    X_test_small = X_test[:2000]
-    y_test_small = y_test[:2000]
-
-    train_gnn(X_train_small, y_train_small, X_test_small, y_test_small)
-
-
-# ---------------- RUN ----------------
 if __name__ == "__main__":
     main()

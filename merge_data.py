@@ -1,40 +1,25 @@
-import pandas as pd
 import glob
 import os
 
+import pandas as pd
+
+from config import DATA_PATH, RAW_DIR
+
 print("--- Merge process started ---")
-print("Current directory:", os.getcwd())
 
-# Get all CSV files
-files = glob.glob("data\\raw\\*.csv")
-
+files = sorted(glob.glob(os.path.join(RAW_DIR, "*.csv")))
 print("Files found:", len(files))
 
-if len(files) == 0:
-    print("[-] No CSV files found. Check folder path.")
-    exit()
+if not files:
+    raise SystemExit(f"[-] No CSV files found in {RAW_DIR}.")
 
-output_file = "data/cicids.csv"
+if os.path.exists(DATA_PATH):
+    os.remove(DATA_PATH)
 
-# Remove old file if exists
-if os.path.exists(output_file):
-    os.remove(output_file)
-
-# Process files one by one (LOW MEMORY SAFE)
+# Process files one by one to keep memory use low
 for i, file in enumerate(files):
     print(f"Processing {file}")
-
-    try:
-        df = pd.read_csv(file, low_memory=False)
-
-        if i == 0:
-            # First file -> write with header
-            df.to_csv(output_file, index=False)
-        else:
-            # Append without header
-            df.to_csv(output_file, mode='a', header=False, index=False)
-
-    except Exception as e:
-        print(f"[-] Error in {file}: {e}")
+    df = pd.read_csv(file, low_memory=False)
+    df.to_csv(DATA_PATH, mode="w" if i == 0 else "a", header=(i == 0), index=False)
 
 print("[+] Dataset merged successfully!")

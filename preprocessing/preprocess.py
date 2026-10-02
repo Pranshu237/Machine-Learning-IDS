@@ -1,59 +1,54 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
-from config import DATA_PATH, TEST_SIZE, RANDOM_STATE
 
-def preprocess():
-    # Read CSV with string infinity handling
-    df = pd.read_csv(DATA_PATH, na_values=['Infinity', 'NaN', 'inf', '-inf', 'INF'], low_memory=False)
+from config import DATA_PATH, RANDOM_STATE, TEST_SIZE
+
+LABEL_COL = "Label"
+
+
+def load_clean(path=DATA_PATH):
+    """Read the merged CICIDS-2017 CSV and return clean features and string labels."""
+    df = pd.read_csv(path, na_values=["Infinity", "NaN", "inf", "-inf", "INF"], low_memory=False)
 
     # Clean column names
     df.columns = df.columns.str.strip()
 
     # Drop redundant duplicated column if present
-    if 'Fwd Header Length.1' in df.columns:
-        df = df.drop(columns=['Fwd Header Length.1'])
+    if "Fwd Header Length.1" in df.columns:
+        df = df.drop(columns=["Fwd Header Length.1"])
 
     # Clean label values (fix corrupted encoding characters)
-    label_col = 'Label'
-    df[label_col] = df[label_col].astype(str).str.strip()
-    df[label_col] = df[label_col].replace({
-        'Web Attack  Brute Force': 'Web Attack - Brute Force',
-        'Web Attack  XSS': 'Web Attack - XSS',
-        'Web Attack  Sql Injection': 'Web Attack - Sql Injection',
-        'Web Attack \ufffd Brute Force': 'Web Attack - Brute Force',
-        'Web Attack \ufffd XSS': 'Web Attack - XSS',
-        'Web Attack \ufffd Sql Injection': 'Web Attack - Sql Injection',
-    })
-    df[label_col] = df[label_col].str.replace('\x96', '-', regex=False).str.replace('\ufffd', '-', regex=False).str.replace('–', '-', regex=False)
+    labels = df[LABEL_COL].astype(str).str.strip()
+    labels = labels.str.replace("\x96", "-", regex=False)
+    labels = labels.str.replace("�", "-", regex=False)
+    labels = labels.str.replace("–", "-", regex=False)
+    labels = labels.str.replace(r"Web Attack\s+-?\s*", "Web Attack - ", regex=True)
+    df[LABEL_COL] = labels
 
-    # Separate features and label
-    y = df[label_col]
-    X = df.drop(columns=[label_col])
+    y = df[LABEL_COL]
+    X = df.drop(columns=[LABEL_COL]).apply(pd.to_numeric, errors="coerce")
+    X = X.replace([np.inf, -np.inf], np.nan)
 
-    # Convert all feature columns to numeric
-    for col in X.columns:
-        X[col] = pd.to_numeric(X[col], errors='coerce')
-
-    # Remove infinite values
-    X.replace([np.inf, -np.inf], np.nan, inplace=True)
-
-    # Combine back to drop rows with missing values
+    # Drop rows with missing values, then exact duplicates
     data = pd.concat([X, y], axis=1).dropna().drop_duplicates()
+    return data.drop(columns=[LABEL_COL]), data[LABEL_COL]
 
-    y = data[label_col]
-    X = data.drop(columns=[label_col])
 
-    # Encode labels
+def preprocess(path=DATA_PATH):
+    X, y = load_clean(path)
+
     le = LabelEncoder()
     y = le.fit_transform(y)
 
-    # Scale
-    scaler = StandardScaler()
-    X = scaler.fit_transform(X)
-
+    # Split first, then fit the scaler on the training set only,
+    # so nothing about the test set leaks into training.
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=y
+        X.values, y, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=y
     )
-    return X_train, X_test, y_train, y_test, le.classes_
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_test = scaler.transform(X_test)
+
+    return X_train, X_test, y_train, y_test, le.classes_
