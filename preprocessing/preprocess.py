@@ -31,9 +31,18 @@ def load_clean(path=DATA_PATH):
     X = df.drop(columns=[LABEL_COL]).apply(pd.to_numeric, errors="coerce")
     X = X.replace([np.inf, -np.inf], np.nan)
 
+    del df
+
     # Drop rows with missing values, then exact duplicates
     data = pd.concat([X, y], axis=1).dropna().drop_duplicates()
-    return data.drop(columns=[LABEL_COL]), data[LABEL_COL]
+    del X, y
+
+    # float32 halves memory use. Duplicates are removed first, at full
+    # precision, so the row count does not depend on this. (scikit-learn's
+    # tree models convert their input to float32 anyway.)
+    labels = data[LABEL_COL]
+    features = data.drop(columns=[LABEL_COL]).astype(np.float32)
+    return features, labels
 
 
 def preprocess(path=DATA_PATH):
@@ -41,11 +50,12 @@ def preprocess(path=DATA_PATH):
 
     le = LabelEncoder()
     y = le.fit_transform(y)
+    X = X.to_numpy()
 
     # Split first, then fit the scaler on the training set only,
     # so nothing about the test set leaks into training.
     X_train, X_test, y_train, y_test = train_test_split(
-        X.values, y, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=y
+        X, y, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=y
     )
     scaler = StandardScaler()
     X_train = scaler.fit_transform(X_train)
