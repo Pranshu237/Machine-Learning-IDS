@@ -27,13 +27,78 @@ Results are written to `results/` as Markdown and JSON.
 
 ## Results
 
-See [`results/benchmark.md`](results/benchmark.md) and
+Full details: [`results/benchmark.md`](results/benchmark.md) and
 [`results/unseen_attacks.md`](results/unseen_attacks.md).
 
 Accuracy is not a useful headline here: about 83% of flows are benign, so a
-model can score over 99% while missing rare attacks. The results report macro
-precision, recall and F1, which weight every class equally, together with
-per-class recall.
+model can score over 99% while missing rare attacks. The tables use macro F1,
+which weights every class equally.
+
+**Full test set** (504,160 flows, 15 classes)
+
+| Model | Macro F1 | Accuracy |
+|---|---|---|
+| XGBoost | 0.879 | 0.9989 |
+| CatBoost | 0.875 | 0.9988 |
+| LightGBM | 0.865 | 0.9988 |
+| Random Forest | 0.852 | 0.9987 |
+
+The four ensembles are close; the remaining errors are concentrated in a few
+classes (Bot, XSS and SQL injection web attacks, Heartbleed), several of which
+have only a handful of test flows.
+
+**Same subset for all five models** (5,000 training / 2,000 test flows)
+
+| Model | Macro F1 |
+|---|---|
+| XGBoost | 0.840 |
+| CatBoost | 0.829 |
+| LightGBM | 0.767 |
+| Random Forest | 0.763 |
+| GNN (GCN) | 0.394 |
+
+The GNN trails the tree models by a wide margin and fits even its own
+training data poorly (0.60 macro F1). One likely reason is that its graph
+links flows that look alike rather than hosts that communicate, so it adds
+little that the features do not already contain (see below).
+
+**Attack types never seen in training**
+
+| Attack family | Detected when in training | Detected when held out | Anomaly detector |
+|---|---|---|---|
+| DoS | 99.9% | 1.2% | 41.9% |
+| DDoS | 100.0% | 63.5% | 5.2% |
+| PortScan | 99.6% | 0.3% | 0.0% |
+| Brute force (FTP/SSH) | 99.9% | 0.2% | 0.0% |
+| Web attacks | 98.8% | 27.2% | 0.0% |
+| Botnet | 91.3% | 0.0% | 0.7% |
+| Infiltration (36 flows) | 100% | 0.0% | 36.1% |
+| Heartbleed (11 flows) | 100% | 0.0% | 100% |
+
+A detector that catches nearly every attack type it was trained on misses
+most attack types it was not: for six of the eight families, detection drops
+below 2%. The anomaly detector, trained on benign traffic only (1% false
+alarms), catches some of what the supervised model misses (DoS,
+Infiltration, Heartbleed) but none of the attacks that resemble normal
+traffic (port scans, brute force, web attacks).
+
+### Two models that failed to train
+
+A model that scores poorly on its own training data has failed to train,
+which is a different problem from failing to generalise, so `train.py`
+reports training macro F1 for every model.
+
+- **LightGBM** scored 0.14 macro F1 in an earlier run. The most likely cause
+  is its default `min_child_weight` (1e-3): leaves for the rarest classes can
+  have almost no hessian, giving huge leaf values. Setting it to 1.0 (XGBoost's default)
+  gave 0.865.
+- **XGBoost** reached only 0.67 macro F1 on its own training data.
+  [`experiments/xgboost_check.py`](experiments/xgboost_check.py) retrained it
+  with one change at a time ([results](results/xgboost_check.json)): a fixed
+  `base_score` of 0.5 restored it (0.95 training, 0.879 test), while float64
+  input changed nothing. `max_delta_step=1` scored higher on the test set
+  (0.924), but choosing by test score would tune on the test set, so the fix
+  targets the diagnosed cause instead.
 
 ## How the graph is built
 
