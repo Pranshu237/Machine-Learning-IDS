@@ -82,6 +82,21 @@ alarms), catches some of what the supervised model misses (DoS,
 Infiltration, Heartbleed) but none of the attacks that resemble normal
 traffic (port scans, brute force, web attacks).
 
+### What the false-alarm rates mean in practice
+
+The dataset has about 419,000 benign flows per capture day (2,095,057 over
+five working days, after de-duplication). At the measured rates, that is
+roughly:
+
+| Detector | Benign flows flagged | False alarms per day |
+|---|---|---|
+| Random Forest (seen attacks) | 0.11% | about 475 |
+| Anomaly detector | 1.03% | about 4,300 |
+
+Because attacks are rare, even a false-alarm rate that looks small produces
+far more alerts than an analyst can check, which is why the anomaly
+detector's threshold matters as much as its detection rate.
+
 ### Two models that failed to train
 
 A model that scores poorly on its own training data has failed to train,
