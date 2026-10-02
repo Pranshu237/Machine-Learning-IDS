@@ -1,0 +1,27 @@
+{
+  "default": {
+    "train_macro_f1": 0.6722782034786067,
+    "test_macro_f1": 0.6681289901850712,
+    "seconds": 87.2
+  },
+  "base_score=0.5": {
+    "train_macro_f1": 0.945552772672615,
+    "test_macro_f1": 0.878910416932573,
+    "seconds": 144.1
+  },
+  "max_delta_step=1": {
+    "train_macro_f1": 0.9394044368998237,
+    "test_macro_f1": 0.9242702039448947,
+    "seconds": 149.8
+  },
+  "learning_rate=0.1, 300 trees": {
+    "train_macro_f1": 0.9452455668226883,
+    "test_macro_f1": 0.8829375065463876,
+    "seconds": 425.2
+  },
+  "default, float64 input": {
+    "train_macro_f1": 0.6722782034786067,
+    "test_macro_f1": 0.6681289901850712,
+    "seconds": 149.5
+  }
+}

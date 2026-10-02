@@ -110,16 +110,16 @@
       "train_seconds": 0.2
     },
     "XGBoost": {
-      "accuracy": 0.9945,
-      "macro_precision": 0.8882472527770399,
-      "macro_recall": 0.8161434336000455,
-      "macro_f1": 0.8403572789149412,
-      "weighted_f1": 0.9933810987629341,
+      "accuracy": 0.994,
+      "macro_precision": 0.8881646163666119,
+      "macro_recall": 0.8150210991443777,
+      "macro_f1": 0.8397580421822846,
+      "weighted_f1": 0.992877797017797,
       "per_class": {
         "BENIGN": {
-          "precision": 0.9951100244498777,
+          "precision": 0.9945021380574222,
           "recall": 0.9987730061349693,
-          "f1-score": 0.9969381506429884,
+          "f1-score": 0.9966329966329966,
           "support": 1630.0
         },
         "Bot": {
@@ -165,9 +165,9 @@
           "support": 4.0
         },
         "PortScan": {
-          "precision": 0.975609756097561,
-          "recall": 0.9876543209876543,
-          "f1-score": 0.9815950920245399,
+          "precision": 0.9753086419753086,
+          "recall": 0.9753086419753086,
+          "f1-score": 0.9753086419753086,
           "support": 81.0
         },
         "SSH-Patator": {
@@ -186,7 +186,7 @@
       "classes_scored": 11,
       "train_accuracy": 1.0,
       "train_macro_f1": 1.0,
-      "train_seconds": 0.6
+      "train_seconds": 0.5
     },
     "LightGBM": {
       "accuracy": 0.993,
