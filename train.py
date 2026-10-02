@@ -1,27 +1,44 @@
 """Train and score every model on CICIDS-2017.
 
-1. Full benchmark: the four tree ensembles on the full 80/20 split.
-2. Subset comparison: all five models (including the GNN) trained on the
-   same small training subset and scored on the same small test subset,
-   since the GNN's k-nearest-neighbour graph does not scale to 2.5M flows.
+Run in two stages:
 
-Results are printed and saved to results/benchmark.md and results/benchmark.json.
+  python train.py --stage full     the four tree ensembles on the full 80/20 split
+  python train.py --stage subset   all five models (including the GNN) trained on
+                                   the same small training subset and scored on the
+                                   same small test subset, since the GNN's
+                                   k-nearest-neighbour graph does not scale to 2.5M flows
+
+The stages run as separate processes because on macOS, PyTorch and
+XGBoost/LightGBM ship different copies of the OpenMP threading library,
+and loading both into one process can crash or freeze it. The full stage
+never imports PyTorch; the subset stage limits OpenMP to one thread,
+which costs little on 5,000 flows.
+
+Each stage saves results/benchmark_<stage>.json, and results/benchmark.md
+is rebuilt from whichever stages have finished.
 """
+import argparse
 import json
 import os
 import platform
 import sys
 import time
 
-import numpy as np
-import sklearn
+parser = argparse.ArgumentParser()
+parser.add_argument("--stage", choices=["full", "subset"], required=True)
+ARGS = parser.parse_args() if __name__ == "__main__" else None
+if ARGS is not None and ARGS.stage == "subset":
+    # Must be set before NumPy, LightGBM or PyTorch are imported.
+    os.environ["OMP_NUM_THREADS"] = "1"
 
-from config import GNN_TEST_SIZE, GNN_TRAIN_SIZE, RANDOM_STATE, RESULTS_DIR
-from models.boosting_models import train_catboost, train_lightgbm, train_xgboost
-from models.gnn_model import GNNClassifier
-from models.rf_model import train_rf
-from preprocessing.preprocess import preprocess
-from utils.metrics import evaluate
+import numpy as np  # noqa: E402
+import sklearn  # noqa: E402
+
+from config import GNN_TEST_SIZE, GNN_TRAIN_SIZE, RANDOM_STATE, RESULTS_DIR  # noqa: E402
+from models.boosting_models import train_catboost, train_lightgbm, train_xgboost  # noqa: E402
+from models.rf_model import train_rf  # noqa: E402
+from preprocessing.preprocess import preprocess  # noqa: E402
+from utils.metrics import evaluate  # noqa: E402
 
 TREE_MODELS = {
     "Random Forest": train_rf,
@@ -32,6 +49,8 @@ TREE_MODELS = {
 
 
 def train_gnn(X, y):
+    from models.gnn_model import GNNClassifier  # imported here so the full stage never loads PyTorch
+
     return GNNClassifier().fit(X, y)
 
 
@@ -82,69 +101,102 @@ def per_class_table(results):
     return "\n".join(rows)
 
 
-def main():
+def write_report():
+    stages = {}
+    for stage in ("full", "subset"):
+        path = os.path.join(RESULTS_DIR, f"benchmark_{stage}.json")
+        if os.path.exists(path):
+            with open(path) as f:
+                stages[stage] = json.load(f)
+    if not stages:
+        return
+    info = next(iter(stages.values()))["data"]
+    env = next(iter(stages.values()))["environment"]
+
+    lines = [
+        "# Benchmark results",
+        "",
+        f"CICIDS-2017, {info['flows']:,} flows after cleaning and de-duplication, "
+        f"{info['features']} features, {info['classes']} classes. "
+        f"Stratified 80/20 split (seed {RANDOM_STATE}); the scaler is fitted on the training set only.",
+        "",
+        "Macro scores weight every class equally, so they show how well the rare attacks are caught. "
+        "Accuracy is dominated by BENIGN traffic (about 83% of flows).",
+    ]
+    if "full" in stages:
+        full = stages["full"]["results"]
+        lines += [
+            "",
+            f"## Full test set ({info['test_flows']:,} flows)",
+            "",
+            table(full),
+            "",
+            "### Recall per class",
+            "",
+            per_class_table(full),
+            "",
+            "Classes with only a handful of test flows (Heartbleed, Infiltration, SQL injection) "
+            "give recall figures that rest on very few examples.",
+        ]
+    if "subset" in stages:
+        sub = stages["subset"]
+        lines += [
+            "",
+            f"## Same subset for all models ({GNN_TRAIN_SIZE:,} training / {GNN_TEST_SIZE:,} test flows)",
+            "",
+            f"Averaged over the {sub['classes_scored']} classes present in the test subset.",
+            "",
+            table(sub["results"]),
+            "",
+            "The GNN connects each flow to its most similar flows in feature space "
+            "(a k-nearest-neighbour graph), not to the hosts it communicated with.",
+        ]
+    lines += ["", f"Environment: Python {env['python']}, scikit-learn {env['scikit-learn']}, "
+                  f"{env['system']} {env['machine']}."]
+    with open(os.path.join(RESULTS_DIR, "benchmark.md"), "w") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def main(stage):
     os.makedirs(RESULTS_DIR, exist_ok=True)
     X_train, X_test, y_train, y_test, target_names = preprocess()
     counts = np.bincount(np.concatenate([y_train, y_test]), minlength=len(target_names))
     print(f"Flows after cleaning: {len(y_train) + len(y_test)} "
           f"(train {len(y_train)}, test {len(y_test)}), features: {X_train.shape[1]}")
 
-    full = run(TREE_MODELS, X_train, y_train, X_test, y_test, target_names)
-
-    # Same subset for every model. The split is already shuffled, so the
-    # first rows are a random sample.
-    Xs_tr, ys_tr = X_train[:GNN_TRAIN_SIZE], y_train[:GNN_TRAIN_SIZE]
-    Xs_te, ys_te = X_test[:GNN_TEST_SIZE], y_test[:GNN_TEST_SIZE]
-    subset_labels = sorted(np.unique(ys_te).tolist())
-    subset = run({**TREE_MODELS, "GNN (GCN)": train_gnn},
-                 Xs_tr, ys_tr, Xs_te, ys_te, target_names, labels=subset_labels)
-
-    env = {
-        "python": sys.version.split()[0],
-        "scikit-learn": sklearn.__version__,
-        "machine": platform.machine(),
-        "system": platform.system(),
+    output = {
+        "data": {
+            "flows": int(len(y_train) + len(y_test)),
+            "test_flows": int(len(y_test)),
+            "features": int(X_train.shape[1]),
+            "classes": int(len(target_names)),
+            "class_counts": dict(zip(map(str, target_names), counts.tolist())),
+        },
+        "environment": {
+            "python": sys.version.split()[0],
+            "scikit-learn": sklearn.__version__,
+            "machine": platform.machine(),
+            "system": platform.system(),
+        },
     }
-    with open(os.path.join(RESULTS_DIR, "benchmark.json"), "w") as f:
-        json.dump({"class_counts": dict(zip(map(str, target_names), counts.tolist())),
-                   "full": full, "subset": subset, "environment": env}, f, indent=2)
 
-    lines = [
-        "# Benchmark results",
-        "",
-        f"CICIDS-2017, {len(y_train) + len(y_test):,} flows after cleaning and de-duplication, "
-        f"{X_train.shape[1]} features, {len(target_names)} classes. "
-        f"Stratified 80/20 split (seed {RANDOM_STATE}); the scaler is fitted on the training set only.",
-        "",
-        "Macro scores weight every class equally, so they show how well the rare attacks are caught. "
-        "Accuracy is dominated by BENIGN traffic (about 83% of flows).",
-        "",
-        f"## Full test set ({len(y_test):,} flows)",
-        "",
-        table(full),
-        "",
-        "### Recall per class",
-        "",
-        per_class_table(full),
-        "",
-        "Classes with only a handful of test flows (Heartbleed, Infiltration, SQL injection) "
-        "give recall figures that rest on very few examples.",
-        "",
-        f"## Same subset for all models ({GNN_TRAIN_SIZE:,} training / {GNN_TEST_SIZE:,} test flows)",
-        "",
-        f"Averaged over the {len(subset_labels)} classes present in the test subset.",
-        "",
-        table(subset),
-        "",
-        "The GNN connects each flow to its most similar flows in feature space "
-        "(a k-nearest-neighbour graph), not to the hosts it communicated with.",
-        "",
-        f"Environment: Python {env['python']}, scikit-learn {env['scikit-learn']}, {env['system']} {env['machine']}.",
-    ]
-    with open(os.path.join(RESULTS_DIR, "benchmark.md"), "w") as f:
-        f.write("\n".join(lines) + "\n")
-    print(f"\nSaved results to {RESULTS_DIR}/benchmark.md")
+    if stage == "full":
+        output["results"] = run(TREE_MODELS, X_train, y_train, X_test, y_test, target_names)
+    else:
+        # Same subset for every model. The split is already shuffled, so the
+        # first rows are a random sample.
+        Xs_tr, ys_tr = X_train[:GNN_TRAIN_SIZE], y_train[:GNN_TRAIN_SIZE]
+        Xs_te, ys_te = X_test[:GNN_TEST_SIZE], y_test[:GNN_TEST_SIZE]
+        labels = sorted(np.unique(ys_te).tolist())
+        output["classes_scored"] = len(labels)
+        output["results"] = run({**TREE_MODELS, "GNN (GCN)": train_gnn},
+                                Xs_tr, ys_tr, Xs_te, ys_te, target_names, labels=labels)
+
+    with open(os.path.join(RESULTS_DIR, f"benchmark_{stage}.json"), "w") as f:
+        json.dump(output, f, indent=2)
+    write_report()
+    print(f"\nSaved results to {RESULTS_DIR}/benchmark_{stage}.json and {RESULTS_DIR}/benchmark.md")
 
 
 if __name__ == "__main__":
-    main()
+    main(ARGS.stage)
