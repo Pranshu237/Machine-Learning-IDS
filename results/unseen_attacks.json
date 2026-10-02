@@ -1,0 +1,103 @@
+{
+  "families": {
+    "DoS": [
+      "DoS Hulk",
+      "DoS GoldenEye",
+      "DoS slowloris",
+      "DoS Slowhttptest"
+    ],
+    "DDoS": [
+      "DDoS"
+    ],
+    "PortScan": [
+      "PortScan"
+    ],
+    "Brute force (FTP/SSH)": [
+      "FTP-Patator",
+      "SSH-Patator"
+    ],
+    "Web attacks": [
+      "Web Attack - Brute Force",
+      "Web Attack - XSS",
+      "Web Attack - Sql Injection"
+    ],
+    "Botnet": [
+      "Bot"
+    ],
+    "Infiltration": [
+      "Infiltration"
+    ],
+    "Heartbleed": [
+      "Heartbleed"
+    ]
+  },
+  "results": {
+    "DoS": {
+      "flows": 193745,
+      "test_flows": 38749,
+      "seen_detection": 0.9987096441198483,
+      "unseen_detection": 0.012242896590879765,
+      "unseen_benign_fpr": 0.0008042729086517809,
+      "anomaly_detection": 0.4186998374151591
+    },
+    "DDoS": {
+      "flows": 128014,
+      "test_flows": 25603,
+      "seen_detection": 0.999882826231301,
+      "unseen_detection": 0.6352273970034528,
+      "unseen_benign_fpr": 0.001100207153971724,
+      "anomaly_detection": 0.05245520021247676
+    },
+    "PortScan": {
+      "flows": 90694,
+      "test_flows": 18139,
+      "seen_detection": 0.996196041678152,
+      "unseen_detection": 0.0028998610712946834,
+      "unseen_benign_fpr": 0.000658692352486325,
+      "anomaly_detection": 0.00011026087723553929
+    },
+    "Brute force (FTP/SSH)": {
+      "flows": 9150,
+      "test_flows": 1830,
+      "seen_detection": 0.9989071038251366,
+      "unseen_detection": 0.0022950819672131148,
+      "unseen_benign_fpr": 0.0010835011885101144,
+      "anomaly_detection": 0.0
+    },
+    "Web attacks": {
+      "flows": 2143,
+      "test_flows": 428,
+      "seen_detection": 0.9883177570093458,
+      "unseen_detection": 0.27158189454036397,
+      "unseen_benign_fpr": 0.0011383922178839748,
+      "anomaly_detection": 0.0
+    },
+    "Botnet": {
+      "flows": 1948,
+      "test_flows": 390,
+      "seen_detection": 0.9128205128205128,
+      "unseen_detection": 0.0,
+      "unseen_benign_fpr": 0.0008185923076188749,
+      "anomaly_detection": 0.006673511293634497
+    },
+    "Infiltration": {
+      "flows": 36,
+      "test_flows": 7,
+      "seen_detection": 1.0,
+      "unseen_detection": 0.0,
+      "unseen_benign_fpr": 0.0011312325184004276,
+      "anomaly_detection": 0.3611111111111111
+    },
+    "Heartbleed": {
+      "flows": 11,
+      "test_flows": 2,
+      "seen_detection": 1.0,
+      "unseen_detection": 0.0,
+      "unseen_benign_fpr": 0.001100207153971724,
+      "anomaly_detection": 1.0
+    }
+  },
+  "seen_benign_fpr": 0.0011336190848949433,
+  "anomaly_benign_fpr": 0.010264622492911898,
+  "benign_train_cap": 500000
+}
