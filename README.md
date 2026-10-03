@@ -151,7 +151,7 @@ Tests use small synthetic data and need no download: `python -m pytest`
 *The dataset is not included in this repository because of its size.*
 
 ## Contributors
-- **Pranshu [surname]**: [his part]
-- **Mayank Sharma**: [your part]
+- **Pranshu Pranshu's surname**: what Pranshu did, e.g. data pipeline, model training, graph neural network
+- **Mayank Sharma**: documentation, evaluation on unseen attack types, fixing the LightGBM and XGBoost training failures, false-alarm analysis
 
 Minor project, B.Tech Computer Science and Engineering, SRM Institute of Science and Technology.
