@@ -1,4 +1,4 @@
-# Network Intrusion Detection on CICIDS-2017
+# BlindSpot: Network Intrusion Detection on Unseen Attacks
 
 A machine learning pipeline that classifies network flows from the
 [CICIDS-2017](https://www.unb.ca/cic/datasets/ids-2017.html) dataset as benign
@@ -149,3 +149,9 @@ cannot be linked by the hosts they connect.
 Tests use small synthetic data and need no download: `python -m pytest`
 
 *The dataset is not included in this repository because of its size.*
+
+## Contributors
+- **Pranshu [surname]**: [his part]
+- **Mayank Sharma**: [your part]
+
+Minor project, B.Tech Computer Science and Engineering, SRM Institute of Science and Technology.
